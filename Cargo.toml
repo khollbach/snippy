@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# TODO: long-term, anyhow probably isn't the "right" choice, but it'll simplify
+# things for now.
+anyhow = "1.0.102"
