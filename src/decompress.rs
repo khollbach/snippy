@@ -2,7 +2,7 @@ use std::{cmp::min, io::Read};
 
 use anyhow::{Context, Result, ensure};
 
-mod varint;
+use crate::varint;
 
 pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
     let total_len: u32 = varint::read(&mut r).context("read total len")?;
