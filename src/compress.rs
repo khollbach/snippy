@@ -10,13 +10,14 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     assert!(n <= usize::try_from(u32::MAX).unwrap());
 
     // TODO: n isn't actually an upper bound, in the worst case
+    // * maybe look at the formula snappy uses?
     let mut out = Vec::with_capacity(n);
 
     // Header: uncompressed length.
     varint::write(u32::try_from(n).unwrap(), &mut out);
 
     let mut emitted = 0; // num input bytes compressed so far
-    let mut seen = HashMap::new();
+    let mut seen = HashMap::with_capacity(n); // (todo...)
 
     let mut i = 0;
     let i_limit = n.saturating_sub(3); // exclusive
