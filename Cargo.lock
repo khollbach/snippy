@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rippy"
+name = "snippy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
