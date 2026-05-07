@@ -17,7 +17,7 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     let mut seen = HashMap::new();
 
     let mut i = 0;
-    let i_limit = n - 3; // exclusive
+    let i_limit = n.saturating_sub(3); // exclusive
     while i < i_limit {
         let mut next_i = i + 1;
 
