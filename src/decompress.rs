@@ -43,6 +43,7 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
             let offset = usize::try_from(offset).unwrap();
             let len = usize::from(len);
 
+            ensure!(offset != 0, "copy offset of 0 is invalid");
             ensure!(
                 offset <= out.len(),
                 "offset past beginning of input: {} vs {}",

@@ -36,8 +36,7 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
                 emitted = i;
             }
 
-            // copy(i - i0, match_len, &mut out);
-            literal(&input[i0..i0 + match_len], &mut out); // todo: emit copy instead
+            copy(i - i0, match_len, &mut out);
             emitted += match_len;
 
             next_i = min(i + match_len, i_limit);
@@ -86,6 +85,5 @@ fn literal(data: &[u8], out: &mut Vec<u8>) {
 }
 
 fn copy(offset: usize, len: usize, out: &mut Vec<u8>) {
-    // todo
-    println!("copy offset:{} match_len:{}", offset, len);
+    
 }
