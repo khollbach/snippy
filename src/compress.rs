@@ -1,6 +1,8 @@
-use std::{cmp::min, collections::HashMap};
+use std::cmp::min;
 
-use crate::varint;
+use crate::{compress::hash_table::HashTable, varint};
+
+mod hash_table;
 
 const BLOCK_SIZE: usize = 64 * 1024;
 const MAX_COPY_LEN: usize = 64;
@@ -28,15 +30,16 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
     let n = input.len();
 
     let mut emitted = 0; // num input bytes compressed so far
-    let mut seen = HashMap::with_capacity(n); // (todo...)
+    let mut seen = HashTable::new(n);
 
     let mut i = 0;
     let i_limit = n.saturating_sub(3); // exclusive
     while i < i_limit {
         let mut next_i = i + 1;
 
-        // It's a match!
-        if let Some(&i0) = seen.get(&input[i..i + 4]) {
+        // Have we seen this 4-byte pattern before?
+        let i0 = seen.get(&input[i..i + 4]);
+        if i != 0 && input[i..i + 4] == input[i0..i0 + 4] {
             // Extend the match as much as possible: find the first place where
             // the slices differ. (Note that the slices might overlap, and
             // that's ok.)
