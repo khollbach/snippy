@@ -62,7 +62,8 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
         let mut next_i = i + 1;
 
         // Have we seen this 4-byte pattern before?
-        let i0 = seen.get(&input[i..i + 4]);
+        let curr_hash = seen.hash(&input[i..i + 4]);
+        let i0 = seen.get(curr_hash);
         if i != 0 && input[i..i + 4] == input[i0..i0 + 4] {
             // Extend the match as much as possible: find the first place where
             // the slices differ. (Note that the slices might overlap, and
@@ -86,8 +87,12 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
             next_i = min(i + match_len, i_limit);
         }
 
+        // Update `seen`.
+        seen.insert(curr_hash, i);
+        i += 1;
         while i < next_i {
-            seen.insert(&input[i..i + 4], i);
+            let hash = seen.hash(&input[i..i + 4]);
+            seen.insert(hash, i);
             i += 1;
         }
     }
