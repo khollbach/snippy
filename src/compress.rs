@@ -6,13 +6,13 @@ use crate::{compress::hash_table::HashTable, varint};
 TODO:
 - try to make this as fast as the reference implementation?
   ideas (cribbed from the code of rust-snappy):
-    - use u16s instead of usizes for the offsets (hash-table values)
-        (this is probably partly the point of limiting block size to 64K)
-    - allocate the exact right size of hash-table up-front
+    - choose a good size for the hash-table allocation
         (see their code for heuristics about how big to make it,
          depending on the size of the current block)
-    - related: for small tables, store them on the stack instead
+    - for small tables, store them on the stack instead
         - todo: get a better understanding of why this is faster
+    - unchecked input-reads didn't seem to make a difference, but
+      maybe unchecked output-writes would? Worth a try!
 - maybe aim for byte-for-byte compatibility with the reference impl?
     - besides the hash-table stuff, I think we're already reasonably close
     - they're doing some stuff with leaving a >=15-byte literal at the end of
@@ -22,11 +22,8 @@ TODO:
   look at a flamegraph of what's slow (and possibly a corresponding one for rust-snappy)
     - there's some stuff like using `%` instead of `>>` in the hash-table impl
         that maybe matters? (maybe?) -- so it would be good to find out what does/doesn't.
-- also, in terms of actually comparing speeds, I'm guessing it'd be worth taking
-  the time to make it a single "button-press" to trigger a comparison benchmark thing
-  (see the rust-snappy readme for an existing one that seems ideal for this)
-    - this would be cool b/c then you can do ad-hoc 'experiments' to get a feel
-      for which tweaks affect performance and by how much.
+- if we ever get really close to rust-snappy in terms of perf, see their readme
+  for benchmarks to try to match them
 */
 
 mod hash_table;
