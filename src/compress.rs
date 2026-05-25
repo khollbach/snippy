@@ -54,10 +54,6 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 }
 
 fn compress_block(input: &[u8], out: &mut Vec<u8>) {
-    // SAFETY: we're careful not to index out of bounds.
-    let slice = |range| unsafe { input.get_unchecked(range) };
-    let byte = |index| unsafe { *input.get_unchecked(index) };
-
     let n = input.len();
 
     let mut emitted = 0; // num input bytes compressed so far
@@ -69,21 +65,21 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
         let mut next_i = i + 1;
 
         // Have we seen this 4-byte pattern before?
-        let i0 = seen.get(slice(i..i + 4));
-        if i != 0 && slice(i..i + 4) == slice(i0..i0 + 4) {
+        let i0 = seen.get(&input[i..i + 4]);
+        if i != 0 && input[i..i + 4] == input[i0..i0 + 4] {
             // Extend the match as much as possible: find the first place where
             // the slices differ. (Note that the slices might overlap, and
             // that's ok.)
             let mut match_len = 4;
             while match_len < MAX_COPY_LEN
                 && i + match_len < n
-                && byte(i0 + match_len) == byte(i + match_len)
+                && input[i0 + match_len] == input[i + match_len]
             {
                 match_len += 1;
             }
 
             if emitted < i {
-                literal(slice(emitted..i), out);
+                literal(&input[emitted..i], out);
                 emitted = i;
             }
 
@@ -94,13 +90,13 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
         }
 
         while i < next_i {
-            seen.insert(slice(i..i + 4), i);
+            seen.insert(&input[i..i + 4], i);
             i += 1;
         }
     }
 
     if emitted < n {
-        literal(slice(emitted..n), out);
+        literal(&input[emitted..n], out);
     }
 }
 
