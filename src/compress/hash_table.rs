@@ -1,5 +1,5 @@
 pub struct HashTable {
-    buckets: Vec<usize>,
+    buckets: Vec<u16>,
 }
 
 impl HashTable {
@@ -19,12 +19,13 @@ impl HashTable {
 
         let bucket = self.hash(pattern);
         let last_seen = self.buckets[bucket];
-        last_seen
+        last_seen as usize
     }
 
     pub fn insert(&mut self, pattern: &[u8], last_seen: usize) {
         assert_eq!(pattern.len(), 4);
         let pattern = u32::from_le_bytes(pattern.try_into().unwrap());
+        let last_seen = u16::try_from(last_seen).unwrap();
 
         let bucket = self.hash(pattern);
         self.buckets[bucket] = last_seen;
