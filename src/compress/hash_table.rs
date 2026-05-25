@@ -21,6 +21,8 @@ impl HashTable {
         assert_eq!(pattern.len(), 4);
         let pattern = u32::from_le_bytes(pattern.try_into().unwrap());
 
+        // TODO: try using >> instead of % here and see what happens to perf
+
         let hash: u32 = pattern.wrapping_mul(0x1e35_a7bd);
         Hash {
             bucket_index: usize::try_from(hash).unwrap() % self.buckets.len(),
