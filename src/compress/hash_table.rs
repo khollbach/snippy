@@ -3,9 +3,10 @@ pub struct HashTable {
 }
 
 impl HashTable {
-    pub fn new(block_size: usize) -> Self {
+    /// TODO: choose # buckets using same heuristics as reference impl
+    pub fn new(_block_size: usize) -> Self {
         Self {
-            buckets: vec![0; block_size],
+            buckets: vec![0; 16 * 1024],
         }
     }
 
