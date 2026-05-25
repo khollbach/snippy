@@ -1,7 +1,5 @@
 use std::cmp::min;
 
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
-
 use crate::{compress::hash_table::HashTable, varint};
 
 /*
