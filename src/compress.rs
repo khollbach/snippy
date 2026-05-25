@@ -38,28 +38,18 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     let n = input.len();
     assert!(n <= usize::try_from(u32::MAX).unwrap());
 
-    // // TODO: n isn't actually an upper bound, in the worst case
-    // // * maybe look at the formula snappy uses?
-    // let mut out = Vec::with_capacity(n);
+    // TODO: n isn't actually an upper bound, in the worst case
+    // * maybe look at the formula snappy uses?
+    let mut out = Vec::with_capacity(n);
 
-    // // Header: uncompressed length.
-    // varint::write(u32::try_from(n).unwrap(), &mut out);
+    // Header: uncompressed length.
+    varint::write(u32::try_from(n).unwrap(), &mut out);
 
-    // for chunk in input.chunks(BLOCK_SIZE) {
-    //     compress_block(chunk, &mut out);
-    // }
+    for chunk in input.chunks(BLOCK_SIZE) {
+        compress_block(chunk, &mut out);
+    }
 
-    let mut header = Vec::with_capacity(5);
-    varint::write(u32::try_from(n).unwrap(), &mut header);
-    let header = rayon::iter::once(header);
-
-    let output_chunks = input.par_chunks(BLOCK_SIZE).map(|chunk| {
-        let mut out_chunk = Vec::with_capacity(BLOCK_SIZE);
-        compress_block(chunk, &mut out_chunk);
-        out_chunk
-    });
-
-    header.chain(output_chunks).flatten().collect()
+    out
 }
 
 fn compress_block(input: &[u8], out: &mut Vec<u8>) {
