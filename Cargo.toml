@@ -7,6 +7,7 @@ edition = "2024"
 # TODO: long-term, maybe anyhow isn't the "right" choice? But it'll simplify
 # things for now.
 anyhow = "1.0.102"
+rayon = "1.12.0"
 
 [dev-dependencies]
 test-case = "3.3.1"
