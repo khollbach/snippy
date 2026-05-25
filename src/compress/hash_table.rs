@@ -3,7 +3,7 @@ pub struct HashTable {
 }
 
 impl HashTable {
-    /// TODO: choose # buckets using same heuristics as reference impl
+    // TODO: choose # buckets using same heuristics as reference impl
     pub fn new(_block_size: usize) -> Self {
         Self {
             buckets: vec![0; 16 * 1024],
@@ -18,8 +18,8 @@ impl HashTable {
         let pattern = u32::from_le_bytes(pattern.try_into().unwrap());
 
         let bucket = self.hash(pattern);
-        let last_seen = self.buckets[bucket];
-        last_seen as usize
+        let last_seen: u16 = self.buckets[bucket];
+        last_seen.into()
     }
 
     pub fn insert(&mut self, pattern: &[u8], last_seen: usize) {
