@@ -4,24 +4,20 @@ use crate::{compress::hash_table::HashTable, varint};
 
 /*
 TODO:
-- try to make this as fast as the reference implementation?
-  ideas (cribbed from the code of rust-snappy):
+- ideas for making this faster
     - choose a good size for the hash-table allocation
-        (see their code for heuristics about how big to make it,
+        (see the reference implementation for heuristics about how big to make it,
          depending on the size of the current block)
     - for small tables, store them on the stack instead
         - todo: get a better understanding of why this is faster
-    - unchecked input-reads didn't seem to make a difference, but
-      maybe unchecked output-writes would? Worth a try!
-        - update: probably not, based on looking at flamegraphs of me vs
-          the reference impl
 - maybe aim for byte-for-byte compatibility with the reference impl?
     - besides the hash-table stuff, I think we're already reasonably close
     - they're doing some stuff with leaving a >=15-byte literal at the end of
       every block, and maybe other stuff I didn't notice too
         - (somewhat curious to know _why_ this is supposed to be faster)
-- if we ever get really close to rust-snappy in terms of perf, see their readme
-  for benchmarks to try to match them
+- we're fairly close in terms of perf now -- our runtime is ~120% of theirs
+    - could be cool to run the benchmarks from their readme, and see if there's
+      any inputs we do particularly bad on
 */
 
 mod hash_table;
