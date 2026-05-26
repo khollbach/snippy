@@ -13,15 +13,13 @@ TODO:
         - todo: get a better understanding of why this is faster
     - unchecked input-reads didn't seem to make a difference, but
       maybe unchecked output-writes would? Worth a try!
+        - update: probably not, based on looking at flamegraphs of me vs
+          the reference impl
 - maybe aim for byte-for-byte compatibility with the reference impl?
     - besides the hash-table stuff, I think we're already reasonably close
     - they're doing some stuff with leaving a >=15-byte literal at the end of
       every block, and maybe other stuff I didn't notice too
         - (somewhat curious to know _why_ this is supposed to be faster)
-- if we do get it somewhat close in terms of speed, it would maybe help to
-  look at a flamegraph of what's slow (and possibly a corresponding one for rust-snappy)
-    - there's some stuff like using `%` instead of `>>` in the hash-table impl
-        that maybe matters? (maybe?) -- so it would be good to find out what does/doesn't.
 - if we ever get really close to rust-snappy in terms of perf, see their readme
   for benchmarks to try to match them
 */
