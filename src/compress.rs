@@ -65,22 +65,14 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
         let curr_hash = seen.hash(&input[i..i + 4]);
         let i0 = seen.get(curr_hash);
         if i != 0 && input[i..i + 4] == input[i0..i0 + 4] {
-            // Extend the match as much as possible: find the first place where
-            // the slices differ. (Note that the slices might overlap, and
-            // that's ok.)
-            let mut match_len = 4;
-            while match_len < MAX_COPY_LEN
-                && i + match_len < n
-                && input[i0 + match_len] == input[i + match_len]
-            {
-                match_len += 1;
-            }
-
+            // Emit a literal up to this point.
             if emitted < i {
                 literal(&input[emitted..i], out);
                 emitted = i;
             }
 
+            // Emit a copy.
+            let match_len = match_len(input, i, i0);
             copy(i - i0, match_len, out);
             emitted += match_len;
 
@@ -100,6 +92,38 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
     if emitted < n {
         literal(&input[emitted..n], out);
     }
+}
+
+/// Extend the match as much as possible: find the first place where the slices
+/// differ. Note that the slices might overlap, and that's ok.
+fn match_len(input: &[u8], i: usize, i0: usize) -> usize {
+    debug_assert!(i0 < i);
+    debug_assert_eq!(input[i..i + 4], input[i0..i0 + 4]);
+
+    let mut match_len = 4;
+    let w = 8; // simd width, I guess?
+    while match_len + w <= MAX_COPY_LEN && i + match_len + w <= input.len() {
+        // This is supposed to help the compiler vectorize. Will it work?
+        let x = &input[i0 + match_len..][..w];
+        let y = &input[i + match_len..][..w];
+        if x == y {
+            match_len += w;
+        } else {
+            // Use clever bit-twiddling to calculate how long the partial match is.
+            let z = u64::from_le_bytes(x.try_into().unwrap())
+                ^ u64::from_le_bytes(y.try_into().unwrap());
+            let prefix_len: u32 = z.trailing_zeros() / u8::BITS;
+            match_len += usize::try_from(prefix_len).unwrap();
+            return match_len;
+        }
+    }
+    while match_len < MAX_COPY_LEN
+        && i + match_len < input.len()
+        && input[i0 + match_len] == input[i + match_len]
+    {
+        match_len += 1;
+    }
+    match_len
 }
 
 fn literal(data: &[u8], out: &mut Vec<u8>) {
