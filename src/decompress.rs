@@ -2,7 +2,12 @@ use std::{cmp::min, io::Read};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::varint;
+use crate::{
+    decompress::tag::{CopyTag, CopyType, LOOKUP_TABLE, LiteralTag, Tag},
+    varint,
+};
+
+mod tag;
 
 pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
     let total_len: u32 = varint::read(&mut r).context("read total len")?;
@@ -19,12 +24,11 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
                 total_len,
             )
         })?;
-        let tag = buf[0];
+        let tag_byte = buf[0];
 
-        if tag & 0x3 == 0x0 {
-            literal(&mut r, tag, &mut out)?;
-        } else {
-            copy(&mut r, tag, &mut out)?;
+        match LOOKUP_TABLE[tag_byte as usize] {
+            Tag::Literal(tag) => literal(&mut r, tag, &mut out)?,
+            Tag::Copy(tag) => copy(&mut r, tag, &mut out)?,
         }
     }
 
@@ -38,18 +42,18 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn literal<R: Read>(mut r: R, tag: u8, out: &mut Vec<u8>) -> Result<()> {
-    let lit_len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
-    let lit_len = usize::try_from(lit_len).unwrap();
+fn literal<R: Read>(mut r: R, tag: LiteralTag, out: &mut Vec<u8>) -> Result<()> {
+    let len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
+    let len = usize::try_from(len).unwrap();
 
     let curr_offset = out.len();
-    let new_len = curr_offset + lit_len;
+    let new_len = curr_offset + len;
     let total_len = out.capacity();
     ensure!(
         new_len <= total_len,
         "curr len plus literal len overflows total len: {} + {} = {} > {}",
         curr_offset,
-        lit_len,
+        len,
         new_len,
         total_len,
     );
@@ -61,29 +65,26 @@ fn literal<R: Read>(mut r: R, tag: u8, out: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-fn read_literal_len<R: Read>(mut r: R, tag: u8) -> Result<u32> {
-    debug_assert_eq!(tag & 0x3, 0x0);
-    let width = match tag >> 2 {
-        60 => 1,
-        61 => 2,
-        62 => 3,
-        63 => 4,
-        n => return Ok(u32::from(n) + 1),
-    };
+fn read_literal_len<R: Read>(mut r: R, tag: LiteralTag) -> Result<u32> {
+    match tag {
+        LiteralTag::LengthValue(len) => return Ok(len.into()),
+        LiteralTag::LengthNumBytes(width) => {
+            let mut buf = [0; 4];
+            r.read_exact(&mut buf[..width.into()])
+                .context("unexpected EOF")?;
 
-    let mut buf = [0; 4];
-    r.read_exact(&mut buf[..width]).context("unexpected EOF")?;
-
-    let len = u32::from_le_bytes(buf)
-        .checked_add(1)
-        .context("literal len must not equal 2^32 (since total len must not equal 2^32)")?;
-    Ok(len)
+            let len = u32::from_le_bytes(buf)
+                .checked_add(1)
+                .context("literal len must not equal 2^32 (since total len must not equal 2^32)")?;
+            Ok(len)
+        }
+    }
 }
 
-fn copy<R: Read>(mut r: R, tag: u8, out: &mut Vec<u8>) -> Result<()> {
-    let (offset, len): (u32, _) = read_copy_tag(&mut r, tag).context("read copy tag")?;
+fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
+    let offset: u32 = read_copy_offset(&mut r, tag.type_).context("read copy offset")?;
     let offset = usize::try_from(offset).unwrap();
-    let len = usize::from(len);
+    let len = usize::from(tag.len);
 
     ensure!(offset != 0, "copy offset of 0 is invalid");
     ensure!(
@@ -116,33 +117,23 @@ fn copy<R: Read>(mut r: R, tag: u8, out: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-/// (offset, len)
-fn read_copy_tag<R: Read>(mut r: R, tag: u8) -> Result<(u32, u8)> {
-    let offset_width = match tag & 0x3 {
-        0 => panic!("read_copy_tag called with literal tag byte"),
-        1 => {
-            let len = (tag >> 2 & 0x7) + 4; // middle 3 bits
-            debug_assert!((4..=11).contains(&len));
-
+fn read_copy_offset<R: Read>(mut r: R, type_: CopyType) -> Result<u32> {
+    match type_ {
+        CopyType::OneByteOffset { high_bits } => {
             let mut buf = [0];
             r.read_exact(&mut buf).context("unexpected EOF")?;
-            let offset_hi = tag >> 5; // high 3 bits
-            let offset_lo = buf[0];
+            let low_bits = buf[0];
 
-            let offset = u16::from_le_bytes([offset_lo, offset_hi]);
-            return Ok((u32::from(offset), len));
+            let offset = u16::from_le_bytes([low_bits, high_bits]);
+            Ok(u32::from(offset))
         }
-        2 => 2,
-        3 => 4,
-        _ => unreachable!(),
-    };
+        CopyType::ManyByteOffset { width } => {
+            let mut buf = [0; 4];
+            r.read_exact(&mut buf[..width.into()])
+                .context("unexpected EOF")?;
+            let offset = u32::from_le_bytes(buf);
 
-    let len = (tag >> 2) + 1;
-
-    let mut buf = [0; 4];
-    r.read_exact(&mut buf[..offset_width])
-        .context("unexpected EOF")?;
-    let offset = u32::from_le_bytes(buf);
-
-    Ok((offset, len))
+            Ok(offset)
+        }
+    }
 }
