@@ -22,9 +22,10 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
 
         if tag & 0x3 == 0x0 {
             let lit_len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
+            let lit_len = usize::try_from(lit_len).unwrap();
 
             let curr_offset = out.len();
-            let new_len = curr_offset + usize::try_from(lit_len).unwrap();
+            let new_len = curr_offset + lit_len;
             ensure!(
                 new_len <= total_len,
                 "curr len plus literal len overflows total len: {} + {} = {} > {}",
@@ -33,13 +34,10 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
                 new_len,
                 total_len,
             );
+            out.resize(new_len, 0);
 
-            // // todo -- is there a faster way? we don't really *need* to write zeros...
-            // out.resize(new_len, 0);
-            // r.read_exact(&mut out[curr_offset..])
-            //     .context("EOF while reading literal")?;
-
-            (&mut r).take(u64::from(lit_len)).read_to_end(&mut out)?;
+            r.read_exact(&mut out[curr_offset..])
+                .context("EOF while reading literal")?;
         } else {
             let (offset, len): (u32, _) = read_copy_tag(&mut r, tag).context("read copy tag")?;
             let offset = usize::try_from(offset).unwrap();
