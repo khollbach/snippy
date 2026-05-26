@@ -7,6 +7,7 @@ use crate::varint;
 pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
     let total_len: u32 = varint::read(&mut r).context("read total len")?;
     let total_len = usize::try_from(total_len).unwrap();
+
     let mut out = Vec::with_capacity(total_len);
 
     while out.len() < total_len {
@@ -21,56 +22,12 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
         let tag = buf[0];
 
         if tag & 0x3 == 0x0 {
-            let lit_len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
-            let lit_len = usize::try_from(lit_len).unwrap();
-
-            let curr_offset = out.len();
-            let new_len = curr_offset + lit_len;
-            ensure!(
-                new_len <= total_len,
-                "curr len plus literal len overflows total len: {} + {} = {} > {}",
-                curr_offset,
-                lit_len,
-                new_len,
-                total_len,
-            );
-            out.resize(new_len, 0);
-
-            r.read_exact(&mut out[curr_offset..])
-                .context("EOF while reading literal")?;
+            literal(&mut r, tag, &mut out)?;
         } else {
-            let (offset, len): (u32, _) = read_copy_tag(&mut r, tag).context("read copy tag")?;
-            let offset = usize::try_from(offset).unwrap();
-            let len = usize::from(len);
-
-            ensure!(offset != 0, "copy offset of 0 is invalid");
-            ensure!(
-                offset <= out.len(),
-                "offset past beginning of input: {} vs {}",
-                offset,
-                out.len()
-            );
-            let slice_start = out.len() - offset;
-            let slice_len = min(offset, len);
-
-            let finished_len = out.len() + len;
-            ensure!(
-                finished_len <= total_len,
-                "curr len plus copy len overflows total len: {} + {} = {} > {}",
-                out.len(),
-                len,
-                finished_len,
-                total_len,
-            );
-
-            // Append `out[slice_start..][..slice_len]`, possibly many times.
-            while out.len() < finished_len {
-                let copy_len = min(slice_len, finished_len - out.len());
-                out.extend_from_within(slice_start..slice_start + copy_len);
-            }
-            debug_assert_eq!(out.len(), finished_len);
+            copy(&mut r, tag, &mut out)?;
         }
     }
+
     ensure!(
         out.len() == total_len,
         "decompressed output longer than expected: {} vs {}",
@@ -79,6 +36,29 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
     );
 
     Ok(out)
+}
+
+fn literal<R: Read>(mut r: R, tag: u8, out: &mut Vec<u8>) -> Result<()> {
+    let lit_len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
+    let lit_len = usize::try_from(lit_len).unwrap();
+
+    let curr_offset = out.len();
+    let new_len = curr_offset + lit_len;
+    let total_len = out.capacity();
+    ensure!(
+        new_len <= total_len,
+        "curr len plus literal len overflows total len: {} + {} = {} > {}",
+        curr_offset,
+        lit_len,
+        new_len,
+        total_len,
+    );
+
+    out.resize(new_len, 0);
+    r.read_exact(&mut out[curr_offset..])
+        .context("EOF while reading literal")?;
+
+    Ok(())
 }
 
 fn read_literal_len<R: Read>(mut r: R, tag: u8) -> Result<u32> {
@@ -98,6 +78,42 @@ fn read_literal_len<R: Read>(mut r: R, tag: u8) -> Result<u32> {
         .checked_add(1)
         .context("literal len must not equal 2^32 (since total len must not equal 2^32)")?;
     Ok(len)
+}
+
+fn copy<R: Read>(mut r: R, tag: u8, out: &mut Vec<u8>) -> Result<()> {
+    let (offset, len): (u32, _) = read_copy_tag(&mut r, tag).context("read copy tag")?;
+    let offset = usize::try_from(offset).unwrap();
+    let len = usize::from(len);
+
+    ensure!(offset != 0, "copy offset of 0 is invalid");
+    ensure!(
+        offset <= out.len(),
+        "offset past beginning of input: {} vs {}",
+        offset,
+        out.len()
+    );
+    let slice_start = out.len() - offset;
+    let slice_len = min(offset, len);
+
+    let finished_len = out.len() + len;
+    let total_len = out.capacity();
+    ensure!(
+        finished_len <= total_len,
+        "curr len plus copy len overflows total len: {} + {} = {} > {}",
+        out.len(),
+        len,
+        finished_len,
+        total_len,
+    );
+
+    // Append `out[slice_start..][..slice_len]`, possibly many times.
+    while out.len() < finished_len {
+        let copy_len = min(slice_len, finished_len - out.len());
+        out.extend_from_within(slice_start..slice_start + copy_len);
+    }
+    debug_assert_eq!(out.len(), finished_len);
+
+    Ok(())
 }
 
 /// (offset, len)
