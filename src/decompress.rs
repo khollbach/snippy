@@ -3,7 +3,7 @@ use std::{cmp::min, io::Read};
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    decompress::tag::{CopyTag, CopyType, LOOKUP_TABLE, LiteralTag, Tag},
+    decompress::tag::{CopyTag, LiteralTag, Tag},
     varint,
 };
 
@@ -26,7 +26,7 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
         })?;
         let tag_byte = buf[0];
 
-        match LOOKUP_TABLE[tag_byte as usize] {
+        match tag::parse(tag_byte) {
             Tag::Literal(tag) => literal(&mut r, tag, &mut out)?,
             Tag::Copy(tag) => copy(&mut r, tag, &mut out)?,
         }
@@ -82,7 +82,7 @@ fn read_literal_len<R: Read>(mut r: R, tag: LiteralTag) -> Result<u32> {
 }
 
 fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
-    let offset: u32 = read_copy_offset(&mut r, tag.type_).context("read copy offset")?;
+    let offset: u32 = read_copy_offset(&mut r, tag).context("read copy offset")?;
     let offset = usize::try_from(offset).unwrap();
     let len = usize::from(tag.len);
 
@@ -117,23 +117,11 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-fn read_copy_offset<R: Read>(mut r: R, type_: CopyType) -> Result<u32> {
-    match type_ {
-        CopyType::OneByteOffset { high_bits } => {
-            let mut buf = [0];
-            r.read_exact(&mut buf).context("unexpected EOF")?;
-            let low_bits = buf[0];
-
-            let offset = u16::from_le_bytes([low_bits, high_bits]);
-            Ok(u32::from(offset))
-        }
-        CopyType::ManyByteOffset { width } => {
-            let mut buf = [0; 4];
-            r.read_exact(&mut buf[..width.into()])
-                .context("unexpected EOF")?;
-            let offset = u32::from_le_bytes(buf);
-
-            Ok(offset)
-        }
-    }
+fn read_copy_offset<R: Read>(mut r: R, tag: CopyTag) -> Result<u32> {
+    let mut buf = [0; 4];
+    r.read_exact(&mut buf[..tag.offset_num_bytes.into()])
+        .context("unexpected EOF")?;
+    let offset = u32::from_le_bytes(buf);
+    let high_bits = u32::from(tag.offset_high_bits);
+    Ok(offset | high_bits)
 }
