@@ -1,5 +1,6 @@
 pub fn parse(tag_byte: u8) -> Tag {
-    unpack(LOOKUP_TABLE[usize::from(tag_byte)])
+    // unpack(LOOKUP_TABLE[usize::from(tag_byte)])
+    Tag::parse_slow(tag_byte)
 }
 
 #[derive(Debug, Clone, Copy)]
