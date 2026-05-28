@@ -36,13 +36,12 @@ const LOOKUP_TABLE: [PackedTag; 256] = lookup_table();
 #[derive(Debug, Clone, Copy)]
 struct PackedTag {
     /// Layout:
-    /// saaa_xbbb_xxcc_cccc
+    /// saaa_0bbb_cccc_cccc
     ///
     /// `s` is 0 for copy, and 1 for literal.
     /// `a` is offset_num_bytes for copy (and 0 for literal).
     /// `b` is offset_high_bits for copy, and length_num_bytes for literal.
     /// `c` is len for copy, and length_value for literal (whenever length_num_bytes is 0).
-    /// (`x`s are 0.)
     bits: u16,
 }
 
@@ -61,17 +60,17 @@ const fn pack(tag: Tag) -> PackedTag {
 
 const fn unpack(packed: PackedTag) -> Tag {
     if packed.bits & 0x8000 != 0 {
-        let length_num_bytes = packed.bits >> 8 & 0x0f;
+        let length_num_bytes = packed.bits >> 8 & 0x07;
         if length_num_bytes != 0 {
             Tag::Literal(LiteralTag::LengthNumBytes(length_num_bytes as u8))
         } else {
-            let len = packed.bits & 0xff;
+            let len = packed.bits & 0x3f; // can only be 6 bits
             Tag::Literal(LiteralTag::LengthValue(len as u8))
         }
     } else {
         Tag::Copy(CopyTag {
             len: (packed.bits & 0xff) as u8,
-            offset_high_bits: packed.bits & 0x0f00,
+            offset_high_bits: packed.bits & 0x0700,
             offset_num_bytes: (packed.bits >> 12) as u8,
         })
     }
