@@ -26,7 +26,7 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
         })?;
         let tag_byte = buf[0];
 
-        match tag::parse(tag_byte) {
+        match Tag::parse(tag_byte) {
             Tag::Literal(tag) => literal(&mut r, tag, &mut out)?,
             Tag::Copy(tag) => copy(&mut r, tag, &mut out)?,
         }
