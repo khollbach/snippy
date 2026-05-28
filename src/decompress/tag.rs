@@ -30,9 +30,6 @@ pub struct CopyTag {
 /// Pre-computed, to speed things up.
 const LOOKUP_TABLE: [PackedTag; 256] = lookup_table();
 
-// todo: use bitbybit instead?
-// * also it looks like there's another a new library in this space, bilge,
-//   which could be worth checking out to see how it compares
 #[derive(Debug, Clone, Copy)]
 struct PackedTag {
     /// Layout:
@@ -64,7 +61,7 @@ const fn unpack(packed: PackedTag) -> Tag {
         if length_num_bytes != 0 {
             Tag::Literal(LiteralTag::LengthNumBytes(length_num_bytes as u8))
         } else {
-            let len = packed.bits & 0x3f; // can only be 6 bits
+            let len = packed.bits & 0xff;
             Tag::Literal(LiteralTag::LengthValue(len as u8))
         }
     } else {
