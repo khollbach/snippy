@@ -1,4 +1,4 @@
-use std::{cmp::min, io::Read};
+use std::{io::Read, ptr};
 
 use anyhow::{Context, Result, ensure};
 
@@ -6,6 +6,25 @@ use crate::{
     decompress::tag::{CopyTag, LiteralTag, Tag},
     varint,
 };
+
+/*
+TODO: perf ideas
+- idea from Ty: set up a guard page, and then just write without checking any bounds ever
+    - need to also handle the signal that the OS sends us when we hit it
+    - overall this sounds *very* involved, but could be really cool to look into
+- from rust-snappy source code:
+    - read 4-byte integer always, and then mask away the high bytes depending on desired width
+    - SIMD stuff...
+        - writing loops in weird ways to encourage compiler to vectorize them
+        - & copying more than you need to sometimes, knowing that it's OK, so that
+          it gets vectorized
+    - being thoughtful about when & where bounds checks are happening / necessary
+    - pre-computing tag-byte info at compile time & looking it up at runtime
+        - I tried this, but it actually slowed us down -- idk what I did wrong...
+    - (maybe more things? see the code for ideas)
+- could also run their benchmarks to see which inputs are especially bad, & maybe
+  that would give us some ideas
+*/
 
 mod tag;
 
@@ -93,8 +112,7 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
         offset,
         out.len()
     );
-    let slice_start = out.len() - offset;
-    let slice_len = min(offset, len);
+    let start = out.len() - offset;
 
     let finished_len = out.len() + len;
     let total_len = out.capacity();
@@ -107,12 +125,13 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
         total_len,
     );
 
-    // Append `out[slice_start..][..slice_len]`, possibly many times.
-    while out.len() < finished_len {
-        let copy_len = min(slice_len, finished_len - out.len());
-        out.extend_from_within(slice_start..slice_start + copy_len);
+    unsafe {
+        let src = out.as_ptr().offset(isize::try_from(start).unwrap());
+        let dst = out.as_mut_ptr().offset(isize::try_from(out.len()).unwrap());
+        ptr::copy(src, dst, len);
+
+        out.set_len(finished_len);
     }
-    debug_assert_eq!(out.len(), finished_len);
 
     Ok(())
 }
