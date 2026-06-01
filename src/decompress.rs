@@ -1,4 +1,4 @@
-use std::{io::Read, ptr};
+use std::{cmp::min, io::Read};
 
 use anyhow::{Context, Result, ensure};
 
@@ -113,7 +113,8 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
         offset,
         out.len()
     );
-    let start = out.len() - offset;
+    let slice_start = out.len() - offset;
+    let slice_len = min(offset, len);
 
     let finished_len = out.len() + len;
     let total_len = out.capacity();
@@ -126,13 +127,12 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
         total_len,
     );
 
-    unsafe {
-        let src = out.as_ptr().offset(isize::try_from(start).unwrap());
-        let dst = out.as_mut_ptr().offset(isize::try_from(out.len()).unwrap());
-        ptr::copy(src, dst, len);
-
-        out.set_len(finished_len);
+    // Append `out[slice_start..][..slice_len]`, possibly many times.
+    while out.len() < finished_len {
+        let copy_len = min(slice_len, finished_len - out.len());
+        out.extend_from_within(slice_start..slice_start + copy_len);
     }
+    debug_assert_eq!(out.len(), finished_len);
 
     Ok(())
 }
