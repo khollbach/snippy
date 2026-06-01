@@ -9,6 +9,7 @@ use crate::{
 
 /*
 TODO: perf ideas
+- in literal-copy code, use unsafe to avoid extra zeroing of output buffer
 - idea from Ty: set up a guard page, and then just write without checking any bounds ever
     - need to also handle the signal that the OS sends us when we hit it
     - overall this sounds *very* involved, but could be really cool to look into
