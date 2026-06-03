@@ -29,13 +29,12 @@ const MAX_COPY_LEN: usize = 64;
 pub fn compress(input: &[u8]) -> Vec<u8> {
     let n = input.len();
     assert!(n <= usize::try_from(u32::MAX).unwrap());
+    let n = u32::try_from(n).unwrap();
 
-    // TODO: n isn't actually an upper bound, in the worst case
-    // * maybe look at the formula snappy uses?
-    let mut out = Vec::with_capacity(n);
+    let mut out = Vec::with_capacity(out_buf_capacity(n));
 
     // Header: uncompressed length.
-    varint::write(u32::try_from(n).unwrap(), &mut out);
+    varint::write(n, &mut out);
 
     for chunk in input.chunks(BLOCK_SIZE) {
         compress_block(chunk, &mut out);
@@ -44,11 +43,47 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     out
 }
 
+/// How much space to pre-allocate in the output buffer.
+fn out_buf_capacity(uncompressed_len: u32) -> usize {
+    max_compressed_len(uncompressed_len)
+        .try_into()
+        .unwrap_or(isize::MAX)
+        .try_into()
+        .unwrap()
+}
+
+fn max_compressed_len(uncompressed_len: u32) -> u64 {
+    let n = u64::from(uncompressed_len);
+
+    // In the worst case, we have:
+    // * 5-byte varint header
+    // * the data itself
+    // * wasting at most 1 byte every 64 bytes
+    let upper_bound = 5 + n + n / 64;
+
+    // The number of wasted bytes is based on the following pattern:
+    // * literal of length 61
+    // * copy of 4 bytes, at offset >= 2048
+    // * ...repeat...
+    // which stores 65 bytes of input data as 61 bytes of data plus 5 bytes of
+    // metadata:
+    // * 2-byte literal tag
+    // * 3-byte copy tag
+    //
+    // Since literals of length < 61 have a 1-byte tag, I don't think you can do
+    // better (worse).
+    //
+    // It also doesn't help to use 3-byte literal tags, since then the literal
+    // length needs to be >= 257. And 5-byte copy tags are never used.
+
+    upper_bound
+}
+
 fn compress_block(input: &[u8], out: &mut Vec<u8>) {
     let n = input.len();
 
-    let mut emitted = 0; // num input bytes compressed so far
     let mut seen = HashTable::new(n);
+    let mut emitted = 0; // num input bytes compressed so far
 
     let mut i = 0;
     let i_limit = n.saturating_sub(3); // exclusive
@@ -59,21 +94,21 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
         let curr_hash = seen.hash(&input[i..i + 4]);
         let i0 = seen.get(curr_hash);
         if i != 0 && input[i..i + 4] == input[i0..i0 + 4] {
-            // Emit a literal up to this point.
+            // It's a match!
+            let offset = i - i0;
+            let len = match_len(input, i, i0);
+
             if emitted < i {
-                literal(&input[emitted..i], out);
+                emit_literal(&input[emitted..i], out);
                 emitted = i;
             }
 
-            // Emit a copy.
-            let match_len = match_len(input, i, i0);
-            copy(i - i0, match_len, out);
-            emitted += match_len;
+            emit_copy(offset, len, out);
+            emitted += len;
 
-            next_i = min(i + match_len, i_limit);
+            next_i = min(i + len, i_limit);
         }
 
-        // Update `seen`.
         seen.insert(curr_hash, i);
         i += 1;
         while i < next_i {
@@ -84,7 +119,7 @@ fn compress_block(input: &[u8], out: &mut Vec<u8>) {
     }
 
     if emitted < n {
-        literal(&input[emitted..n], out);
+        emit_literal(&input[emitted..n], out);
     }
 }
 
@@ -97,72 +132,71 @@ fn match_len(input: &[u8], i: usize, i0: usize) -> usize {
     let mut match_len = 4;
     while match_len < MAX_COPY_LEN
         && i + match_len < input.len()
-        && input[i0 + match_len] == input[i + match_len]
+        && input[i + match_len] == input[i0 + match_len]
     {
         match_len += 1;
     }
     match_len
 }
 
-fn literal(data: &[u8], out: &mut Vec<u8>) {
-    debug_assert!(!data.is_empty());
-    let len = data.len();
+fn emit_literal(data: &[u8], out: &mut Vec<u8>) {
+    emit_literal_tag(data.len(), out);
+    out.extend_from_slice(data);
+}
+
+fn emit_literal_tag(len: usize, out: &mut Vec<u8>) {
+    debug_assert!(len != 0);
     debug_assert!(len <= usize::try_from(u32::MAX).unwrap());
 
     if len <= 60 {
         let len = u8::try_from(len).unwrap();
-        let tag = (len - 1) << 2;
-        out.push(tag);
+        let tag_byte = (len - 1) << 2;
+        out.push(tag_byte);
     } else {
         let len = u32::try_from(len).unwrap();
         let len_minus_one = len - 1;
-        let (width, encoding) = match len_minus_one {
-            0x0..=0xff => (1, 60),
-            0x100..=0xffff => (2, 61),
-            0x1_0000..=0xff_ffff => (3, 62),
-            0x100_0000..=0xffff_ffff => (4, 63),
-        };
 
-        let tag = encoding << 2;
-        out.push(tag);
+        let num_empty_bytes: u32 = len_minus_one.leading_zeros() / 8;
+        let num_bytes = 4 - u8::try_from(num_empty_bytes).unwrap();
+
+        let tag_byte = (59 + num_bytes) << 2;
+        out.push(tag_byte);
 
         let buf = len_minus_one.to_le_bytes();
-        out.extend_from_slice(&buf[..width]);
+        out.extend_from_slice(&buf[..num_bytes.into()]);
     }
-
-    out.extend_from_slice(data);
 }
 
-fn copy(offset: usize, len: usize, out: &mut Vec<u8>) {
+fn emit_copy(offset: usize, len: usize, out: &mut Vec<u8>) {
     debug_assert!(offset != 0);
     debug_assert!(offset <= usize::try_from(u32::MAX).unwrap());
     debug_assert!(len != 0);
     debug_assert!(len <= MAX_COPY_LEN);
 
     // "1-byte" offset
-    if (4..=11).contains(&len) && offset < 1 << 11 {
+    if (4..=11).contains(&len) && offset < (1 << 11) {
         let len_minus_4 = u8::try_from(len - 4).unwrap();
-        debug_assert!(len_minus_4 <= 0x7);
+        assert!(len_minus_4 <= 0x7);
 
-        let offset_high = u8::try_from(offset >> 8).unwrap();
-        debug_assert!(offset_high <= 0x7);
-        let offset_low = u8::try_from(offset & 0xff).unwrap();
+        let offset_high_bits = u8::try_from(offset >> 8).unwrap();
+        assert!(offset_high_bits <= 0x7);
+        let offset_low_byte = u8::try_from(offset & 0xff).unwrap();
 
-        let tag = offset_high << 5 | len_minus_4 << 2 | 0x1;
-        out.push(tag);
-        out.push(offset_low);
+        let tag_byte = offset_high_bits << 5 | len_minus_4 << 2 | 0x1;
+        out.push(tag_byte);
+        out.push(offset_low_byte);
     }
     // 2-byte offset
     else if let Ok(offset) = u16::try_from(offset) {
-        let tag = u8::try_from(len - 1).unwrap() << 2 | 0x2;
-        out.push(tag);
+        let tag_byte = u8::try_from(len - 1).unwrap() << 2 | 0x2;
+        out.push(tag_byte);
         out.extend_from_slice(&offset.to_le_bytes());
     }
     // 4-byte offset
     else {
         let offset = u32::try_from(offset).unwrap();
-        let tag = u8::try_from(len - 1).unwrap() << 2 | 0x3;
-        out.push(tag);
+        let tag_byte = u8::try_from(len - 1).unwrap() << 2 | 0x3;
+        out.push(tag_byte);
         out.extend_from_slice(&offset.to_le_bytes());
     }
 }
