@@ -1,72 +1,90 @@
+use std::io::Read;
+
+use anyhow::{Context, Result};
+
 #[derive(Debug, Clone, Copy)]
 pub enum Tag {
-    Literal(LiteralTag),
-    Copy(CopyTag),
+    Literal { len: u32 },
+    Copy { offset: u32, len: u8 },
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum LiteralTag {
+pub fn read<R: Read>(r: &mut R) -> Result<Tag> {
+    let mut buf = [0];
+    r.read_exact(&mut buf).context("unexpected EOF")?;
+    let tag_byte = buf[0];
+
+    match parse_tag_byte(tag_byte) {
+        TagByte::LiteralLengthValue(len) => Ok(Tag::Literal { len: len.into() }),
+        TagByte::LiteralLengthNumBytes(n) => {
+            let mut buf = [0; 4];
+            r.read_exact(&mut buf[..n.into()])
+                .context("unexpected EOF")?;
+
+            let len = u32::from_le_bytes(buf)
+                .checked_add(1)
+                .context("literal len must not equal 2^32 (since total len must not equal 2^32)")?;
+            Ok(Tag::Literal { len })
+        }
+        TagByte::Copy {
+            len,
+            offset_high_bits,
+            offset_num_bytes,
+        } => {
+            let mut buf = [0; 4];
+            r.read_exact(&mut buf[..offset_num_bytes.into()])
+                .context("unexpected EOF")?;
+
+            let mut offset = u32::from_le_bytes(buf);
+            offset |= offset_high_bits;
+
+            Ok(Tag::Copy { offset, len })
+        }
+    }
+}
+
+enum TagByte {
     /// 1..=60
-    LengthValue(u8),
+    LiteralLengthValue(u8),
     /// 1..=4
-    LengthNumBytes(u8),
+    LiteralLengthNumBytes(u8),
+    Copy {
+        /// 1..=64
+        len: u8,
+        /// Has this pattern of bits:
+        /// xxxx_xxxx_xxxx_xxxx__xxxx_xbbb_xxxx_xxxx
+        /// Gets or'd with offset.
+        offset_high_bits: u32,
+        /// 1, 2, or 4.
+        offset_num_bytes: u8,
+    },
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct CopyTag {
-    pub len: u8,
-    /// Has this pattern of bits:
-    /// xxxx_xbbb_xxxx_xxxx
-    /// Gets or'd with offset.
-    pub offset_high_bits: u16,
-    /// 1, 2, or 4.
-    pub offset_num_bytes: u8,
-}
-
-impl Tag {
-    pub fn parse(tag: u8) -> Self {
-        if tag & 0x3 == 0x0 {
-            Self::Literal(LiteralTag::parse(tag))
-        } else {
-            Self::Copy(CopyTag::parse(tag))
-        }
-    }
-}
-
-impl LiteralTag {
-    fn parse(tag: u8) -> Self {
-        match tag >> 2 {
-            60 => Self::LengthNumBytes(1),
-            61 => Self::LengthNumBytes(2),
-            62 => Self::LengthNumBytes(3),
-            63 => Self::LengthNumBytes(4),
-            n => Self::LengthValue(n + 1),
-        }
-    }
-}
-
-impl CopyTag {
-    fn parse(tag: u8) -> Self {
-        match tag & 0x3 {
-            0 => panic!("cannot parse literal tag byte as copy tag"),
-            1 => Self {
-                // middle 3 bits
-                len: (tag >> 2 & 0x7) + 4,
-                // high 3 bits
-                offset_high_bits: ((tag >> 5) as u16) << 8,
-                offset_num_bytes: 1,
-            },
-            2 => Self {
-                len: (tag >> 2) + 1,
-                offset_high_bits: 0,
-                offset_num_bytes: 2,
-            },
-            3 => Self {
-                len: (tag >> 2) + 1,
-                offset_high_bits: 0,
-                offset_num_bytes: 4,
-            },
-            _ => unreachable!(),
-        }
+fn parse_tag_byte(tag_byte: u8) -> TagByte {
+    match tag_byte & 0x3 {
+        0 => match tag_byte >> 2 {
+            60 => TagByte::LiteralLengthNumBytes(1),
+            61 => TagByte::LiteralLengthNumBytes(2),
+            62 => TagByte::LiteralLengthNumBytes(3),
+            63 => TagByte::LiteralLengthNumBytes(4),
+            n => TagByte::LiteralLengthValue(n + 1),
+        },
+        1 => TagByte::Copy {
+            // middle 3 bits
+            len: ((tag_byte >> 2) & 0x7) + 4,
+            // high 3 bits
+            offset_high_bits: u32::from(tag_byte >> 5) << 8,
+            offset_num_bytes: 1,
+        },
+        2 => TagByte::Copy {
+            len: (tag_byte >> 2) + 1,
+            offset_high_bits: 0,
+            offset_num_bytes: 2,
+        },
+        3 => TagByte::Copy {
+            len: (tag_byte >> 2) + 1,
+            offset_high_bits: 0,
+            offset_num_bytes: 4,
+        },
+        _ => unreachable!(),
     }
 }

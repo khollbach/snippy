@@ -69,6 +69,6 @@ BufReader both wrapping the file, so you'd probably want your own thing? Details
 unclear, but could be interesting to think about.
 */
 
-pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
-    decompress::decompress(compressed)
+pub fn decompress(mut compressed: &[u8]) -> Result<Vec<u8>> {
+    decompress::decompress(&mut compressed)
 }

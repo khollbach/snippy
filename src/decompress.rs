@@ -2,10 +2,7 @@ use std::{cmp::min, io::Read};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::{
-    decompress::tag::{CopyTag, LiteralTag, Tag},
-    varint,
-};
+use crate::{decompress::tag::Tag, varint};
 
 /*
 TODO: perf ideas
@@ -29,26 +26,19 @@ TODO: perf ideas
 
 mod tag;
 
-pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
-    let total_len: u32 = varint::read(&mut r).context("read total len")?;
+pub fn decompress<R: Read>(r: &mut R) -> Result<Vec<u8>> {
+    let total_len: u32 = varint::read(r).context("read total len")?;
     let total_len = usize::try_from(total_len).unwrap();
 
     let mut out = Vec::with_capacity(total_len);
 
     while out.len() < total_len {
-        let mut buf = [0];
-        r.read_exact(&mut buf).with_context(|| {
-            format!(
-                "unexpected EOF; decoded {} of {} bytes",
-                out.len(),
-                total_len,
-            )
-        })?;
-        let tag_byte = buf[0];
+        let tag = tag::read(r)
+            .with_context(|| format!("decoded {} of {} bytes", out.len(), total_len))?;
 
-        match Tag::parse(tag_byte) {
-            Tag::Literal(tag) => literal(&mut r, tag, &mut out)?,
-            Tag::Copy(tag) => copy(&mut r, tag, &mut out)?,
+        match tag {
+            Tag::Literal { len } => decompress_literal(r, len, &mut out)?,
+            Tag::Copy { offset, len } => decompress_copy(offset, len, &mut out)?,
         }
     }
 
@@ -62,49 +52,29 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn literal<R: Read>(mut r: R, tag: LiteralTag, out: &mut Vec<u8>) -> Result<()> {
-    let len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
+fn decompress_literal<R: Read>(r: &mut R, len: u32, out: &mut Vec<u8>) -> Result<()> {
     let len = usize::try_from(len).unwrap();
 
-    let curr_offset = out.len();
-    let new_len = curr_offset + len;
-    let total_len = out.capacity();
     ensure!(
-        new_len <= total_len,
+        out.len() + len <= out.capacity(),
         "curr len plus literal len overflows total len: {} + {} = {} > {}",
-        curr_offset,
+        out.len(),
         len,
-        new_len,
-        total_len,
+        out.len() + len,
+        out.capacity(),
     );
 
-    out.resize(new_len, 0);
-    r.read_exact(&mut out[curr_offset..])
+    let start = out.len();
+    out.resize(out.len() + len, 0);
+    r.read_exact(&mut out[start..])
         .context("EOF while reading literal")?;
 
     Ok(())
 }
 
-fn read_literal_len<R: Read>(mut r: R, tag: LiteralTag) -> Result<u32> {
-    match tag {
-        LiteralTag::LengthValue(len) => return Ok(len.into()),
-        LiteralTag::LengthNumBytes(width) => {
-            let mut buf = [0; 4];
-            r.read_exact(&mut buf[..width.into()])
-                .context("unexpected EOF")?;
-
-            let len = u32::from_le_bytes(buf)
-                .checked_add(1)
-                .context("literal len must not equal 2^32 (since total len must not equal 2^32)")?;
-            Ok(len)
-        }
-    }
-}
-
-fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
-    let offset: u32 = read_copy_offset(&mut r, tag).context("read copy offset")?;
+fn decompress_copy(offset: u32, len: u8, out: &mut Vec<u8>) -> Result<()> {
     let offset = usize::try_from(offset).unwrap();
-    let len = usize::from(tag.len);
+    let len = usize::from(len);
 
     ensure!(offset != 0, "copy offset of 0 is invalid");
     ensure!(
@@ -113,19 +83,18 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
         offset,
         out.len()
     );
-    let slice_start = out.len() - offset;
-    let slice_len = min(offset, len);
-
-    let finished_len = out.len() + len;
-    let total_len = out.capacity();
     ensure!(
-        finished_len <= total_len,
+        out.len() + len <= out.capacity(),
         "curr len plus copy len overflows total len: {} + {} = {} > {}",
         out.len(),
         len,
-        finished_len,
-        total_len,
+        out.len() + len,
+        out.capacity(),
     );
+
+    let slice_start = out.len() - offset;
+    let slice_len = min(len, offset);
+    let finished_len = out.len() + len;
 
     // Append `out[slice_start..][..slice_len]`, possibly many times.
     while out.len() < finished_len {
@@ -135,13 +104,4 @@ fn copy<R: Read>(mut r: R, tag: CopyTag, out: &mut Vec<u8>) -> Result<()> {
     debug_assert_eq!(out.len(), finished_len);
 
     Ok(())
-}
-
-fn read_copy_offset<R: Read>(mut r: R, tag: CopyTag) -> Result<u32> {
-    let mut buf = [0; 4];
-    r.read_exact(&mut buf[..tag.offset_num_bytes.into()])
-        .context("unexpected EOF")?;
-    let offset = u32::from_le_bytes(buf);
-    let high_bits = u32::from(tag.offset_high_bits);
-    Ok(offset | high_bits)
 }

@@ -2,7 +2,7 @@ use std::io::Read;
 
 use anyhow::{Context, Result, ensure};
 
-pub fn read<R: Read>(mut r: R) -> Result<u32> {
+pub fn read<R: Read>(r: &mut R) -> Result<u32> {
     let mut out = 0;
 
     for i in 0.. {
@@ -53,8 +53,8 @@ mod tests {
 
     #[test_case(&[0x80, 0x80, 0x80, 0x80, 0x10]; "overflow")]
     #[test_case(&[0x80, 0x80, 0x80, 0x80, 0x80]; "too many bytes")]
-    fn read_err(buf: &[u8]) {
-        read(buf).unwrap_err();
+    fn read_err(mut buf: &[u8]) {
+        read(&mut buf).unwrap_err();
     }
 
     #[test_case(&[0], 0; "zero")]
