@@ -42,9 +42,8 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     varint::write(n, &mut varint_contents);
     result.push(varint_contents);
 
-    result.push
-        (input.chunks(BLOCK_SIZE)
-        .into_iter()
+    let output_chunks: Vec<Vec<u8>> = input
+        .par_chunks(BLOCK_SIZE)
         .map(|chunk| {
             let mut buffer = Vec::with_capacity(BLOCK_SIZE);
 
@@ -52,13 +51,9 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 
             buffer
         })
-            .flatten()
-            .collect::<Vec<u8>>());
+        .collect();
 
-    result
-        .into_iter()
-        .flatten()
-        .collect()
+    result.into_iter().flatten().collect()
 }
 
 /// How much space to pre-allocate in the output buffer.
