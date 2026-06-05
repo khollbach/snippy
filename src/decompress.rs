@@ -65,7 +65,12 @@ fn decompress_literal<R: Read>(r: &mut R, len: u32, out: &mut Vec<u8>) -> Result
     );
 
     let start = out.len();
-    out.resize(out.len() + len, 0);
+
+    // out.resize(out.len() + len, 0);
+    unsafe {
+        out.set_len(out.len() + len);
+    };
+
     r.read_exact(&mut out[start..])
         .context("EOF while reading literal")?;
 
