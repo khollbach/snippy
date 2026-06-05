@@ -1,5 +1,7 @@
 use std::cmp::min;
 
+use rayon::prelude::*;
+
 use crate::{compress::hash_table::HashTable, varint};
 
 /*
@@ -31,16 +33,32 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     assert!(n <= usize::try_from(u32::MAX).unwrap());
     let n = u32::try_from(n).unwrap();
 
-    let mut out = Vec::with_capacity(out_buf_capacity(n));
+    // let mut out = Vec::with_capacity(out_buf_capacity(n));
 
     // Header: uncompressed length.
-    varint::write(n, &mut out);
+    let mut result = vec![];
 
-    for chunk in input.chunks(BLOCK_SIZE) {
-        compress_block(chunk, &mut out);
-    }
+    let mut varint_contents = vec![];
+    varint::write(n, &mut varint_contents);
+    result.push(varint_contents);
 
-    out
+    result.push
+        (input.chunks(BLOCK_SIZE)
+        .into_iter()
+        .map(|chunk| {
+            let mut buffer = Vec::with_capacity(BLOCK_SIZE);
+
+            compress_block(chunk, &mut buffer);
+
+            buffer
+        })
+            .flatten()
+            .collect::<Vec<u8>>());
+
+    result
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// How much space to pre-allocate in the output buffer.
